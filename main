@@ -1,0 +1,158 @@
+// ==UserScript==
+// @name         tranbomdi
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Bôi đen văn bản trên trang web, hiện nút "Dịch", bấm vào để dịch sang tiếng Việt (dùng Google Translate không chính thức)
+// @author       You
+// @match        *://*/*
+// @grant        GM_xmlhttpRequest
+// @connect      translate.googleapis.com
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const TARGET_LANG = 'vi'; // đổi thành 'en', 'ja', ... nếu muốn dịch sang ngôn ngữ khác
+
+    let btn = null;
+    let resultBox = null;
+    let lastSelectedText = '';
+
+    // Tạo nút "Dịch" nổi lên gần vùng bôi đen
+    function createButton(x, y) {
+        removeUI();
+
+        btn = document.createElement('div');
+        btn.textContent = '🌐 Dịch';
+        Object.assign(btn.style, {
+            position: 'absolute',
+            top: `${y + window.scrollY + 8}px`,
+            left: `${x + window.scrollX}px`,
+            background: '#1a73e8',
+            color: '#fff',
+            padding: '6px 12px',
+            borderRadius: '6px',
+            fontSize: '13px',
+            fontFamily: 'Arial, sans-serif',
+            cursor: 'pointer',
+            zIndex: 999999,
+            boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+            userSelect: 'none',
+        });
+
+        btn.addEventListener('mousedown', (e) => {
+            // ngăn việc click làm mất vùng bôi đen trước khi kịp xử lý
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            translateText(lastSelectedText, x, y);
+        });
+
+        document.body.appendChild(btn);
+    }
+
+    // Tạo hộp hiển thị kết quả dịch
+    function showResultBox(text, x, y) {
+        if (resultBox) resultBox.remove();
+
+        resultBox = document.createElement('div');
+        Object.assign(resultBox.style, {
+            position: 'absolute',
+            top: `${y + window.scrollY + 8}px`,
+            left: `${x + window.scrollX}px`,
+            maxWidth: '320px',
+            background: '#fff',
+            color: '#222',
+            padding: '10px 14px',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontFamily: 'Arial, sans-serif',
+            lineHeight: '1.4',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+            border: '1px solid #ddd',
+            zIndex: 999999,
+            whiteSpace: 'pre-wrap',
+        });
+
+        resultBox.textContent = text;
+
+        const closeBtn = document.createElement('span');
+        closeBtn.textContent = ' ✕';
+        closeBtn.style.color = '#999';
+        closeBtn.style.cursor = 'pointer';
+        closeBtn.style.float = 'right';
+        closeBtn.addEventListener('click', removeUI);
+        resultBox.prepend(closeBtn);
+
+        document.body.appendChild(resultBox);
+    }
+
+    function removeUI() {
+        if (btn) { btn.remove(); btn = null; }
+        if (resultBox) { resultBox.remove(); resultBox = null; }
+    }
+
+    // Gọi API dịch (endpoint công khai không chính thức của Google Translate)
+    function translateText(text, x, y) {
+        if (!text) return;
+
+        if (btn) {
+            btn.textContent = '⏳ Đang dịch...';
+        }
+
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${TARGET_LANG}&dt=t&q=${encodeURIComponent(text)}`;
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            onload: function (response) {
+                try {
+                    const data = JSON.parse(response.responseText);
+                    const translated = data[0].map(part => part[0]).join('');
+                    showResultBox(translated, x, y);
+                } catch (err) {
+                    showResultBox('Lỗi khi phân tích kết quả dịch.', x, y);
+                } finally {
+                    if (btn) { btn.remove(); btn = null; }
+                }
+            },
+            onerror: function () {
+                showResultBox('Không thể kết nối tới dịch vụ dịch.', x, y);
+                if (btn) { btn.remove(); btn = null; }
+            }
+        });
+    }
+
+    // Lắng nghe sự kiện bôi đen văn bản
+    document.addEventListener('mouseup', function (e) {
+        // Nếu click vào nút hoặc hộp kết quả thì bỏ qua
+        if (btn && (e.target === btn)) return;
+        if (resultBox && resultBox.contains(e.target)) return;
+
+        setTimeout(() => {
+            const selection = window.getSelection();
+            const text = selection ? selection.toString().trim() : '';
+
+            if (text.length > 0) {
+                lastSelectedText = text;
+                const rect = selection.getRangeAt(0).getBoundingClientRect();
+                createButton(rect.left, rect.bottom);
+            } else {
+                removeUI();
+            }
+        }, 10);
+    });
+
+    // Ẩn nút/kết quả khi click ra ngoài
+    document.addEventListener('mousedown', function (e) {
+        if (btn && e.target === btn) return;
+        if (resultBox && resultBox.contains(e.target)) return;
+        if (e.target !== btn) {
+            // sẽ được xử lý lại ở sự kiện mouseup nếu có bôi đen mới
+        }
+    });
+})();
